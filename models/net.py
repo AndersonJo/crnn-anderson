@@ -187,8 +187,6 @@ class Decoder(nn.Module):
         out1, (h_1, c_1) = self.lstm1(cnn_feature, h_0, c_0)
         out2, (h_1, c_1) = self.lstm2(out1, h_1, c_1)
         output = F.log_softmax(out2, dim=2)
-        import ipdb
-        ipdb.set_trace()
         return output
 
 
