@@ -27,7 +27,8 @@ torch.manual_seed(128)
 
 def init() -> Namespace:
     parser = ArgumentParser()
-    parser.add_argument('--batch', default=200, type=int, help='batch size')
+    parser.add_argument('--epoch', default=1000, type=int, help='epoch size')
+    parser.add_argument('--batch', default=8, type=int, help='batch size')
     parser.add_argument('--train', default='./train_data', help='the path of train dataset')
     parser.add_argument('--val', default='./valid_data', help='the path of validation dataset')
     parser.add_argument('--label', default='./label.txt', help='the path of label txt file')
@@ -199,7 +200,7 @@ def main():
                                           mode='min')
 
     # Train
-    trainer = Trainer(gpus=opt.gpu, max_epochs=opt.batch, checkpoint_callback=checkpoint_callback)
+    trainer = Trainer(gpus=opt.gpu, max_epochs=opt.epoch, checkpoint_callback=checkpoint_callback)
     trainer.fit(model)
 
     # Development
