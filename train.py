@@ -27,7 +27,7 @@ torch.manual_seed(128)
 
 def init() -> Namespace:
     parser = ArgumentParser()
-    parser.add_argument('--batch', default=8, type=int, help='batch size')
+    parser.add_argument('--batch', default=200, type=int, help='batch size')
     parser.add_argument('--train', default='./train_data', help='the path of train dataset')
     parser.add_argument('--val', default='./valid_data', help='the path of validation dataset')
     parser.add_argument('--label', default='./label.txt', help='the path of label txt file')
@@ -36,7 +36,8 @@ def init() -> Namespace:
     parser.add_argument('--height', default=256, type=int, help='resized image height')
     parser.add_argument('--backbone', default='resnet101', type=str, help='cnn backbone')
     parser.add_argument('--max_seq', default=8, type=int, help='the maximum sequence length')
-    parser.add_argument('--lr', default=0.01, type=int, help='initial learning rate (it uses decay of lr')
+    parser.add_argument('--lr', default=0.001, type=int, help='initial learning rate (it uses decay of lr')
+    parser.add_argument('--gpu', default=1, type=int, help='the number of gpus')
     parser.add_argument('--cuda', default='cuda')
 
     opt = parser.parse_args()
@@ -86,11 +87,11 @@ class AttentionCRNNModule(pl.LightningModule):
             - y_text: tuple('Z72모9981', 'Z91오1969', ...)
         """
         y_text, y_label, y_seq, y_pred, y_pred_seq, loss = self.calculate_loss(batch)
-        lr = self.lr
-        if self.optimizer is not None:
-            lr = self.optimizer.param_groups[0]['lr']
 
-        tensorboard_logs = {'train_loss': loss, 'lr': lr}
+        if self.optimizer is not None:
+            self.lr = self.optimizer.param_groups[0]['lr']
+
+        tensorboard_logs = {'train_loss': loss, 'lr': self.lr}
         return {'loss': loss, 'log': tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
@@ -198,7 +199,7 @@ def main():
                                           mode='min')
 
     # Train
-    trainer = Trainer(gpus=1, max_epochs=10, checkpoint_callback=checkpoint_callback)
+    trainer = Trainer(gpus=opt.gpu, max_epochs=opt.batch, checkpoint_callback=checkpoint_callback)
     trainer.fit(model)
 
     # Development

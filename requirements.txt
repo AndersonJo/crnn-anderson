@@ -1,0 +1,9 @@
+# Pytorch
+torch==1.4.0
+torchvision==0.6.0
+pytorch-lightning==0.7.5
+
+# Tools
+imageio==2.8.0
+scikit-image==0.16.2
+
