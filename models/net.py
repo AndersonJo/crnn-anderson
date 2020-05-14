@@ -34,10 +34,8 @@ class AttentionRCNN(nn.Module):
         c_s = torch.cat([h[1] for h in hiddens])
 
         decoder_output = self.decoder(cnn_feature, encoder_output, (h_0, c_0), h_s, c_s)
-        import ipdb
-        ipdb.set_trace()
 
-        return None
+        return decoder_output
 
 
 class ResNet(TorchVisionResnet):
@@ -189,6 +187,8 @@ class Decoder(nn.Module):
         out1, (h_1, c_1) = self.lstm1(cnn_feature, h_0, c_0)
         out2, (h_1, c_1) = self.lstm2(out1, h_1, c_1)
         output = F.log_softmax(out2, dim=2)
+        import ipdb
+        ipdb.set_trace()
         return output
 
 

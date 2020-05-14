@@ -27,7 +27,6 @@ class LicensePlateDataset(Dataset):
             image = self.transform(image)
 
         y = file_name[:-4]
-
         return image, y
 
     def calculate_mean_and_std(self):

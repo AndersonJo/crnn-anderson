@@ -3,16 +3,28 @@ import tempfile
 import torch
 import torch.nn.functional as F
 
-from models.resnet import load_resnet, PyramidFeatures, AttentionRCNN
+from models.net import load_resnet, PyramidFeatures, AttentionRCNN
+from train import AttentionCRNNModel, init
+
+
+class opt:
+    batch: int = 16
+    train: str = 'train_data'
+    val: str = 'valid_data'
+    lr: float = 0.0001
+    device = torch.device('cuda')
 
 
 def test_resnet():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    attrcnn = AttentionRCNN(device=device)
-    attrcnn = attrcnn.cuda()
+    model = AttentionCRNNModel(opt)
+    model.prepare_data()
+    val_dl = model.test_dataloader()
 
-    x = torch.rand((16, 3, 250, 480)).cuda()
-    x2 = attrcnn(x)
+    model = AttentionRCNN(device=opt.device)
+    model.cuda()
+    for i, batch in enumerate(val_dl):
+        x, y = batch
+        model(x.cuda())
 
     import ipdb
     ipdb.set_trace()
