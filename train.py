@@ -1,4 +1,5 @@
 import os
+import re
 from argparse import ArgumentParser, Namespace
 from typing import Union, List, Tuple
 
@@ -7,8 +8,10 @@ import pytorch_lightning as pl
 import torch
 import torch.optim as optim
 from torch.nn import CTCLoss
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 from dataset import LicensePlateDataset
 from models.net import AttentionRCNN
@@ -27,11 +30,12 @@ def init() -> Namespace:
     parser.add_argument('--train', default='./train_data', help='the path of train dataset')
     parser.add_argument('--val', default='./valid_data', help='the path of validation dataset')
     parser.add_argument('--label', default='./label.txt', help='the path of label txt file')
+    parser.add_argument('--checkpoint', default='./checkpoints', help='the path of checkpoint directory')
     parser.add_argument('--width', default=384, type=int, help='resized image width')
     parser.add_argument('--height', default=256, type=int, help='resized image height')
     parser.add_argument('--backbone', default='resnet101', type=str, help='cnn backbone')
     parser.add_argument('--max_seq', default=8, type=int, help='the maximum sequence length')
-    parser.add_argument('--lr', default=0.0001, type=int, help='learning rate')
+    parser.add_argument('--lr', default=0.01, type=int, help='initial learning rate (it uses decay of lr')
     parser.add_argument('--cuda', default='cuda')
 
     opt = parser.parse_args()
@@ -39,13 +43,16 @@ def init() -> Namespace:
     opt.val_path = os.path.join(BASE_DIR, opt.val)
     opt.label_path = os.path.join(BASE_DIR, opt.label)
     opt.device = torch.device('cuda' if opt.cuda else 'cpu')
+
+    if os.path.exists('lightning_logs'):
+        os.rmdir('./lightning_logs')
     return opt
 
 
-class AttentionCRNNModel(pl.LightningModule):
+class AttentionCRNNModule(pl.LightningModule):
 
     def __init__(self, opt):
-        super(AttentionCRNNModel, self).__init__()
+        super(AttentionCRNNModule, self).__init__()
 
         self.batch: int = opt.batch
         self.img_height = opt.height
@@ -111,7 +118,9 @@ class AttentionCRNNModel(pl.LightningModule):
         return y_label, y_seq, y_pred, y_pred_seq, loss
 
     def configure_optimizers(self):
-        return optim.RMSprop(self.parameters(), lr=self.lr)
+        optimizer = optim.RMSprop(self.parameters(), lr=self.lr)
+        scheduler = ReduceLROnPlateau(optimizer, 'min')
+        return [optimizer], [scheduler]
 
     def prepare_data(self):
         self.train_dataset = LicensePlateDataset(self.train_path, transform=self.transform_compose)
@@ -147,14 +156,37 @@ class AttentionCRNNModel(pl.LightningModule):
         return self._transform
 
 
-def main():
-    opt = init()
-
-    model = AttentionCRNNModel(opt)
+def load_model(opt):
+    if os.path.exists(opt.checkpoint):
+        regex = re.compile(r'epoch=(\d+)_val_loss=(\d+\.\d+)\.ckpt')
+        checkpoints = [filename for filename in os.listdir(opt.checkpoint) if filename.endswith('.ckpt')]
+        scores = [(ckpt, float(regex.match(ckpt).group(2))) for ckpt in checkpoints]
+        scores = sorted(scores, key=lambda x: x[1])
+        checkpoint_path = os.path.join(opt.checkpoint, scores[0][0])
+        model = AttentionCRNNModule.load_from_checkpoint(checkpoint_path, opt=opt)
+        print('Checkpoint Loaded:', checkpoint_path)
+    else:
+        model = AttentionCRNNModule(opt)
     model.to(opt.device)
     print('is cuda:', next(model.parameters()).is_cuda)
+    return model
 
-    trainer = Trainer(gpus=1, max_epochs=10)
+
+def main():
+    opt = init()
+    model = load_model(opt)
+
+    # Checkpoint
+    checkpoint_path = os.path.join(opt.checkpoint, '{epoch:02}_{val_loss:.4f}')
+    checkpoint_callback = ModelCheckpoint(filepath=checkpoint_path,
+                                          save_weights_only=True,
+                                          save_top_k=3,
+                                          verbose=True,
+                                          monitor='val_loss',
+                                          mode='min')
+
+    # Train
+    trainer = Trainer(gpus=1, max_epochs=10, checkpoint_callback=checkpoint_callback)
     trainer.fit(model)
     # model.prepare_data()
     # test_dl = model.test_dataloader()

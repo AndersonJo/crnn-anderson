@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 
 from models.net import load_resnet, PyramidFeatures, AttentionRCNN
-from train import AttentionCRNNModel, init
+from train import AttentionCRNNModule, init
 
 
 class opt:
@@ -16,7 +16,7 @@ class opt:
 
 
 def test_resnet():
-    model = AttentionCRNNModel(opt)
+    model = AttentionCRNNModule(opt)
     model.prepare_data()
     val_dl = model.test_dataloader()
 

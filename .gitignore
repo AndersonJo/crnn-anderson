@@ -7,3 +7,7 @@
 *.jpg
 train_data
 valid_data
+lightning_logs
+checkpoints
+*.ckpt
+meta_tags.csv
