@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 from argparse import ArgumentParser, Namespace
 from typing import Union, List, Tuple
 
@@ -7,16 +8,16 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.optim as optim
+from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.nn import CTCLoss
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from pytorch_lightning.callbacks import ModelCheckpoint
 
 from dataset import LicensePlateDataset
 from models.net import AttentionRCNN
 from tools.label import LabelConverter
-from pytorch_lightning import Trainer
 
 BASE_DIR = os.path.dirname(__file__)
 
@@ -45,7 +46,7 @@ def init() -> Namespace:
     opt.device = torch.device('cuda' if opt.cuda else 'cpu')
 
     if os.path.exists('lightning_logs'):
-        os.rmdir('./lightning_logs')
+        shutil.rmtree('./lightning_logs')
     return opt
 
 
@@ -83,7 +84,7 @@ class AttentionCRNNModule(pl.LightningModule):
             - x     : Tensor(batch, 3, 256, 384)
             - y_text: tuple('Z72모9981', 'Z91오1969', ...)
         """
-        y_label, y_seq, y_pred, y_pred_seq, loss = self.calculate_loss(batch)
+        y_text, y_label, y_seq, y_pred, y_pred_seq, loss = self.calculate_loss(batch)
 
         tensorboard_logs = {'train_loss': loss}
         return {'loss': loss, 'log': tensorboard_logs}
@@ -94,7 +95,11 @@ class AttentionCRNNModule(pl.LightningModule):
             - x     : Tensor(batch, 3, 256, 384)
             - y_text: tuple('Z72모9981', 'Z91오1969', ...)
         """
-        y_label, y_seq, y_pred, y_pred_seq, loss = self.calculate_loss(batch)
+        y_text, y_label, y_seq, y_pred, y_pred_seq, loss = self.calculate_loss(batch)
+        _, y_index = y_pred.max(2)  # y_index: maximum index locations (seq, batch) ex.(192, 8)
+        texts = self.label.to_text(y_index, y_pred_seq)
+        import ipdb
+        ipdb.set_trace()
         tensorboard_logs = {'val_log': loss}
         return {'val_loss': loss, 'log': tensorboard_logs}
 
@@ -115,7 +120,7 @@ class AttentionCRNNModule(pl.LightningModule):
         # Calculate loss
         y_pred_seq = torch.LongTensor([y_pred.size(0)] * batch_size)
         loss = self.criterion(y_pred, y_label, y_pred_seq, y_seq) / batch_size
-        return y_label, y_seq, y_pred, y_pred_seq, loss
+        return y_text, y_label, y_seq, y_pred, y_pred_seq, loss
 
     def configure_optimizers(self):
         optimizer = optim.RMSprop(self.parameters(), lr=self.lr)
@@ -157,15 +162,19 @@ class AttentionCRNNModule(pl.LightningModule):
 
 
 def load_model(opt):
+    model = None
     if os.path.exists(opt.checkpoint):
         regex = re.compile(r'epoch=(\d+)_val_loss=(\d+\.\d+)\.ckpt')
         checkpoints = [filename for filename in os.listdir(opt.checkpoint) if filename.endswith('.ckpt')]
-        scores = [(ckpt, float(regex.match(ckpt).group(2))) for ckpt in checkpoints]
-        scores = sorted(scores, key=lambda x: x[1])
-        checkpoint_path = os.path.join(opt.checkpoint, scores[0][0])
-        model = AttentionCRNNModule.load_from_checkpoint(checkpoint_path, opt=opt)
-        print('Checkpoint Loaded:', checkpoint_path)
-    else:
+
+        if checkpoints:
+            scores = [(ckpt, float(regex.match(ckpt).group(2))) for ckpt in checkpoints]
+            scores = sorted(scores, key=lambda x: x[1])
+            checkpoint_path = os.path.join(opt.checkpoint, scores[0][0])
+            model = AttentionCRNNModule.load_from_checkpoint(checkpoint_path, opt=opt)
+            print('Checkpoint Loaded:', checkpoint_path)
+
+    if model is None:
         model = AttentionCRNNModule(opt)
     model.to(opt.device)
     print('is cuda:', next(model.parameters()).is_cuda)
@@ -180,18 +189,22 @@ def main():
     checkpoint_path = os.path.join(opt.checkpoint, '{epoch:02}_{val_loss:.4f}')
     checkpoint_callback = ModelCheckpoint(filepath=checkpoint_path,
                                           save_weights_only=True,
-                                          save_top_k=3,
+                                          save_top_k=1,
                                           verbose=True,
                                           monitor='val_loss',
                                           mode='min')
 
     # Train
-    trainer = Trainer(gpus=1, max_epochs=10, checkpoint_callback=checkpoint_callback)
-    trainer.fit(model)
-    # model.prepare_data()
-    # test_dl = model.test_dataloader()
-    # for i, batch in enumerate(test_dl):
-    #     y_pred = model.training_step(batch, i)
+    # trainer = Trainer(gpus=1, max_epochs=10, checkpoint_callback=checkpoint_callback)
+    # trainer.fit(model)
+
+    # Development
+    model.prepare_data()
+    test_dl = model.val_dataloader()
+
+    for i, batch in enumerate(test_dl):
+        y_pred = model.validation_step(batch, i)
+        break
 
 
 if __name__ == '__main__':

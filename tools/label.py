@@ -5,7 +5,7 @@ import torch
 
 class LabelConverter:
 
-    def __init__(self, label_path: str, max_seq: int, pad='<pad>', delimiter='<delimeter>'):
+    def __init__(self, label_path: str, max_seq: int, pad=' ', delimiter='<delimeter>'):
         self.label_path = label_path
         self.max_seq = max_seq
         self.c2i = dict()
@@ -29,9 +29,30 @@ class LabelConverter:
 
         return y_label, y_seq
 
+    def to_text(self, y_index: torch.Tensor, y_seqs: torch.Tensor = None):
+        """
+        :param y_index: _, y_index = y_pred.max(2)
+        :param y_seqs: a list of sequence length (batch_size,) ex.(192, 192, 192, ... 192)
+        :return:
+        """
+        seq_size, batch_size = y_index.shape
 
-    def to_text(self, ):
-        pass
+        if y_seqs is None:
+            y_seqs = torch.LongTensor([seq_size] * batch_size)
+
+        assert y_index.numel() == y_seqs.sum()
+        texts = []
+
+        for i in range(batch_size):
+            n_seq = y_seqs[i]  # 192
+            sequence = y_index[:, i]
+            text = []
+            for j in range(n_seq):
+                if sequence[j] != 0 and (not (j > 0 and sequence[j - 1] == sequence[j])):
+                    text.append(self.i2c[sequence[j].item()])
+            texts.append(text)
+
+        return texts
 
     @property
     def n_label(self):
