@@ -17,14 +17,20 @@ def init() -> Namespace:
 
 def generate_y_labels(opt: Namespace):
     chars = set()
+    max_len = 0
     for filename in os.listdir(opt.data_path):
         filename = filename[:-4]
         [chars.add(c) for c in filename]
+        max_len = max(max_len, len(filename))
 
     chars = sorted(list(chars))
     with open(opt.output, 'wt') as f:
         for c in chars:
             f.write(c + '\n')
+
+    print('Y Label Generation has been done')
+    print('number of characters:', len(chars))
+    print('max len:', max_len)
 
 
 def main():

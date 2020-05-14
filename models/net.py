@@ -9,7 +9,7 @@ from torchvision.models.resnet import model_urls, Bottleneck
 
 
 class AttentionRCNN(nn.Module):
-    def __init__(self, device: torch.device, backbone: str = 'resnet101', hidden_size=64, n_class=10):
+    def __init__(self, backbone: str, n_class: int, device: torch.device, hidden_size=64):
         super(AttentionRCNN, self).__init__()
         self.device = device
         self.hidden_size = hidden_size
@@ -132,7 +132,7 @@ class Encoder(nn.Module):
         self.hidden_size = hidden_size
         self.device = device
 
-        self.lstm = nn.LSTM(input_size, hidden_size, bidirectional=True, dropout=0.1)
+        self.lstm = nn.LSTM(input_size, hidden_size, bidirectional=True)
 
     def forward(self, cnn_feature):
         """
