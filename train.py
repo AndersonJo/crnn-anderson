@@ -73,6 +73,7 @@ class AttentionCRNNModule(pl.LightningModule):
         self.model = AttentionRCNN(backbone=opt.backbone,
                                    n_class=self.n_label,
                                    device=opt.device)
+        self.optimizer = None
         self.criterion = CTCLoss()
 
     def forward(self, x):
@@ -85,8 +86,11 @@ class AttentionCRNNModule(pl.LightningModule):
             - y_text: tuple('Z72모9981', 'Z91오1969', ...)
         """
         y_text, y_label, y_seq, y_pred, y_pred_seq, loss = self.calculate_loss(batch)
+        lr = self.lr
+        if self.optimizer is not None:
+            lr = self.optimizer.param_groups[0]['lr']
 
-        tensorboard_logs = {'train_loss': loss}
+        tensorboard_logs = {'train_loss': loss, 'lr': lr}
         return {'loss': loss, 'log': tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
@@ -98,8 +102,7 @@ class AttentionCRNNModule(pl.LightningModule):
         y_text, y_label, y_seq, y_pred, y_pred_seq, loss = self.calculate_loss(batch)
         _, y_index = y_pred.max(2)  # y_index: maximum index locations (seq, batch) ex.(192, 8)
         texts = self.label.to_text(y_index, y_pred_seq)
-        import ipdb
-        ipdb.set_trace()
+
         tensorboard_logs = {'val_log': loss}
         return {'val_loss': loss, 'log': tensorboard_logs}
 
@@ -123,9 +126,9 @@ class AttentionCRNNModule(pl.LightningModule):
         return y_text, y_label, y_seq, y_pred, y_pred_seq, loss
 
     def configure_optimizers(self):
-        optimizer = optim.RMSprop(self.parameters(), lr=self.lr)
-        scheduler = ReduceLROnPlateau(optimizer, 'min')
-        return [optimizer], [scheduler]
+        self.optimizer = optim.RMSprop(self.parameters(), lr=self.lr)
+        scheduler = ReduceLROnPlateau(self.optimizer, 'min')
+        return [self.optimizer], [scheduler]
 
     def prepare_data(self):
         self.train_dataset = LicensePlateDataset(self.train_path, transform=self.transform_compose)
@@ -195,16 +198,16 @@ def main():
                                           mode='min')
 
     # Train
-    # trainer = Trainer(gpus=1, max_epochs=10, checkpoint_callback=checkpoint_callback)
-    # trainer.fit(model)
+    trainer = Trainer(gpus=1, max_epochs=10, checkpoint_callback=checkpoint_callback)
+    trainer.fit(model)
 
     # Development
-    model.prepare_data()
-    test_dl = model.val_dataloader()
-
-    for i, batch in enumerate(test_dl):
-        y_pred = model.validation_step(batch, i)
-        break
+    # model.prepare_data()
+    # test_dl = model.val_dataloader()
+    #
+    # for i, batch in enumerate(test_dl):
+    #     y_pred = model.training_step(batch, i)
+    #     break
 
 
 if __name__ == '__main__':

@@ -25,6 +25,3 @@ def test_resnet():
     for i, batch in enumerate(val_dl):
         x, y = batch
         model(x.cuda())
-
-    import ipdb
-    ipdb.set_trace()

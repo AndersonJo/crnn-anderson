@@ -14,7 +14,7 @@ class LicensePlateDataset(Dataset):
         self.dir_path = dir_path
         self.transform = transform
         self.img_files = [f for f in os.listdir(self.dir_path) if f.endswith('jpg')]
-        self.img_files = self.img_files[:200]
+        # self.img_files = self.img_files[:200]
 
     def __len__(self):
         return len(self.img_files)
