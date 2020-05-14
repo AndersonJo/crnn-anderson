@@ -1,0 +1,9 @@
+.idea
+.ipynb_checkpoints
+*.swp
+*.pyc
+
+# Data
+*.jpg
+train_data
+valid_data
