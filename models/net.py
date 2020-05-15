@@ -18,20 +18,21 @@ class AttentionRCNN(nn.Module):
         self.pyramid = PyramidFeatures(*self.resnet.fpn_sizes)
 
         # self.encoder = Encoder(128, self.hidden_size, device=self.device)
-        self.decoder = Decoder(2048, 256, n_class, device=self.device)
+        self.decoder = Decoder(768, 256, n_class, device=self.device)
 
     def forward(self, x):
         batch_size = x.size(0)
 
         # Resnet & PyramidNet
         h = self.resnet(x)
-        conv = h[-1]  # (batch, 2048, 8, 12)
-        bs, fs, hs, ws = conv.shape
-        reshaped_conv = conv.view(bs, fs, hs * ws)  # (batch, 2048, 96)
+        # conv = h[-1]  # (batch, 2048, 8, 12)
+        # bs, fs, hs, ws = conv.shape
+        # reshaped_conv = conv.view(bs, fs, hs * ws)  # (batch, 2048, 96)
 
-        # features = self.pyramid(h)
-        # cnn_feature = torch.cat([f.squeeze(2) for f in features], dim=2)  # (batch, 64, 768)
-        decoder_output = self.decoder(reshaped_conv)
+        features = self.pyramid(h)
+        cnn_feature = torch.cat([f.squeeze(2) for f in features], dim=2)  # (batch, 64, 768)
+
+        decoder_output = self.decoder(cnn_feature)
         return decoder_output
 
 
@@ -134,7 +135,7 @@ class Decoder(nn.Module):
         self.lstm2 = BidirectionalLSTM(256, 256, n_class)
 
     def forward(self, cnn_feature: torch.Tensor):
-        cnn_feature = cnn_feature.permute(2, 0, 1)
+        cnn_feature = cnn_feature.permute(1, 0, 2)
         ss, bs, hs = cnn_feature.shape
 
         # h_0, c_0 = self.init_hidden(batch_size=bs)
