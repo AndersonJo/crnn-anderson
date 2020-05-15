@@ -199,8 +199,8 @@ class AttentionCRNNModule(pl.LightningModule):
         transform = transforms.Compose([
             transforms.Resize((self.img_height, self.img_width)),
             # transforms.RandomVerticalFlip(0.3),
-            # transforms.RandomGrayscale(0.1),
-            # transforms.ColorJitter(brightness=(0.2, 2), contrast=(0.3, 2), saturation=(0.2, 2), hue=(-0.3, 0.3)),
+            transforms.RandomGrayscale(0.1),
+            transforms.ColorJitter(brightness=(0.2, 2), contrast=(0.3, 2), saturation=(0.2, 2), hue=(-0.3, 0.3)),
             transforms.ToTensor(),
             transforms.Normalize(0.5, 0.5)
         ])
