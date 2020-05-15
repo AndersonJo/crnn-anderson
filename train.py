@@ -153,7 +153,7 @@ class AttentionCRNNModule(pl.LightningModule):
                 n_char += 1
 
         word_acc = n_correct / len(y_text)
-        char_acc = c_correct / n_char
+        char_acc = c_correct / (n_char + 1e-8)
         return y_index, pred_text, n_correct, word_acc, char_acc
 
     def configure_optimizers(self):
