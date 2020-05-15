@@ -234,7 +234,7 @@ def main():
                       max_epochs=opt.epoch,
                       checkpoint_callback=checkpoint_callback,
                       # track_grad_norm=2,
-                      log_gpu_memory=True)
+                      log_gpu_memory=False)
     trainer.fit(model)
 
     # Development
