@@ -134,7 +134,7 @@ class AttentionCRNNModule(pl.LightningModule):
         avg_loss = torch.stack([x['val_loss'] for x in val_outputs]).mean()
         avg_word_acc = np.mean([x['val_word_acc'] for x in val_outputs])
         avg_char_acc = np.mean([x['val_char_acc'] for x in val_outputs])
-        tensorboard_logs = {'val_loss': avg_loss, 'word_acc': avg_word_acc, 'avg_char_acc': avg_char_acc}
+        tensorboard_logs = {'val_loss': avg_loss, 'val_word_acc': avg_word_acc, 'avg_char_acc': avg_char_acc}
         return {'val_loss': avg_loss, 'log': tensorboard_logs}
 
     def calculate_loss(self, batch: Tuple[torch.Tensor, tuple]):
