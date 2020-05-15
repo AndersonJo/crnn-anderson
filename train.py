@@ -75,7 +75,6 @@ class AttentionCRNNModule(pl.LightningModule):
         self.model = AttentionRCNN(backbone=opt.backbone,
                                    n_class=self.n_label,
                                    device=opt.device)
-        self.optimizer = None
         self.criterion = CTCLoss()
 
     def forward(self, x):
@@ -88,11 +87,15 @@ class AttentionCRNNModule(pl.LightningModule):
             - y_text: tuple('Z72모9981', 'Z91오1969', ...)
         """
         y_text, y_label, y_seq, y_pred, y_pred_seq, loss = self.calculate_loss(batch)
+        y_index, pred_text, n_correct, word_acc, char_acc = self.calculate_acc(y_text, y_pred)
 
-        if self.optimizer is not None:
-            self.lr = self.optimizer.param_groups[0]['lr']
+        if batch_idx % 20 == 0:
+            log_text = '  |  '.join([f'{t2}({t1})' for t1, t2 in zip(y_text[:3], pred_text[:3])])
+            self.logger.experiment.add_text('pred_text', log_text)
 
-        tensorboard_logs = {'train_loss': loss, 'lr': self.lr}
+        tensorboard_logs = {'train_loss': loss,
+                            'train_word_acc': word_acc,
+                            'train_char_acc': char_acc}
         return {'loss': loss, 'log': tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
@@ -102,15 +105,21 @@ class AttentionCRNNModule(pl.LightningModule):
             - y_text: tuple('Z72모9981', 'Z91오1969', ...)
         """
         y_text, y_label, y_seq, y_pred, y_pred_seq, loss = self.calculate_loss(batch)
-        _, y_index = y_pred.max(2)  # y_index: maximum index locations (seq, batch) ex.(192, 8)
-        texts = self.label.to_text(y_index, y_pred_seq)
+        y_index, pred_text, n_correct, word_acc, char_acc = self.calculate_acc(y_text, y_pred)
 
-        tensorboard_logs = {'val_log': loss}
-        return {'val_loss': loss, 'log': tensorboard_logs}
+        tensorboard_logs = {'val_log': loss,
+                            'val_word_acc': word_acc,
+                            'var_char_acc': char_acc}
+        return {'val_loss': loss,
+                'val_word_acc': word_acc,
+                'val_char_acc': char_acc,
+                'log': tensorboard_logs}
 
     def validation_epoch_end(self, val_outputs):
         avg_loss = torch.stack([x['val_loss'] for x in val_outputs]).mean()
-        tensorboard_logs = {'val_loss': avg_loss}
+        avg_word_acc = np.mean([x['val_word_acc'] for x in val_outputs])
+        avg_char_acc = np.mean([x['val_char_acc'] for x in val_outputs])
+        tensorboard_logs = {'val_loss': avg_loss, 'word_acc': avg_word_acc, 'avg_char_acc': avg_char_acc}
         return {'val_loss': avg_loss, 'log': tensorboard_logs}
 
     def calculate_loss(self, batch: Tuple[torch.Tensor, tuple]):
@@ -127,10 +136,33 @@ class AttentionCRNNModule(pl.LightningModule):
         loss = self.criterion(y_pred, y_label, y_pred_seq, y_seq) / batch_size
         return y_text, y_label, y_seq, y_pred, y_pred_seq, loss
 
+    def calculate_acc(self, y_text, y_pred):
+        _, y_index = y_pred.max(2)  # y_index: maximum index locations (seq, batch) ex.(192, 8)
+        import ipdb
+        ipdb.set_trace()
+        y_index = y_index.transpose(0, 1)
+        pred_text = self.label.to_text(y_index)
+
+        n_correct = 0
+        c_correct = 0
+        n_char = 0
+        for t1, t2 in zip(y_text, pred_text):
+            if t1 == t2:
+                n_correct += 1
+            for c1, c2 in zip(t1, t2):
+                if c1 == c2:
+                    c_correct += 1
+                n_char += 1
+
+        word_acc = n_correct / len(y_text)
+        char_acc = c_correct / n_char
+        return y_index, pred_text, n_correct, word_acc, char_acc
+
     def configure_optimizers(self):
-        self.optimizer = optim.RMSprop(self.parameters(), lr=self.lr)
-        scheduler = ReduceLROnPlateau(self.optimizer, 'min')
-        return [self.optimizer], [scheduler]
+        optimizer = optim.RMSprop(self.parameters(), lr=self.lr)
+        lr_scheduler = {'scheduler': ReduceLROnPlateau(optimizer, 'min'),
+                        'name': 'ReduceLROnPlateau'}
+        return [optimizer], [lr_scheduler]
 
     def prepare_data(self):
         self.train_dataset = LicensePlateDataset(self.train_path, transform=self.transform_compose)
@@ -173,8 +205,8 @@ def load_model(opt):
         checkpoints = [filename for filename in os.listdir(opt.checkpoint) if filename.endswith('.ckpt')]
 
         if checkpoints:
-            scores = [(ckpt, float(regex.match(ckpt).group(2))) for ckpt in checkpoints]
-            scores = sorted(scores, key=lambda x: x[1])
+            scores = [(ckpt, float(regex.match(ckpt).group(1))) for ckpt in checkpoints]
+            scores = sorted(scores, key=lambda x: -x[1])
             checkpoint_path = os.path.join(opt.checkpoint, scores[0][0])
             model = AttentionCRNNModule.load_from_checkpoint(checkpoint_path, opt=opt)
             print('Checkpoint Loaded:', checkpoint_path)
@@ -200,7 +232,11 @@ def main():
                                           mode='min')
 
     # Train
-    trainer = Trainer(gpus=opt.gpu, max_epochs=opt.epoch, checkpoint_callback=checkpoint_callback)
+    trainer = Trainer(gpus=opt.gpu,
+                      max_epochs=opt.epoch,
+                      checkpoint_callback=checkpoint_callback,
+                      # track_grad_norm=2,
+                      log_gpu_memory=True)
     trainer.fit(model)
 
     # Development

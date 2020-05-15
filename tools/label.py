@@ -35,8 +35,7 @@ class LabelConverter:
         :param y_seqs: a list of sequence length (batch_size,) ex.(192, 192, 192, ... 192)
         :return:
         """
-        seq_size, batch_size = y_index.shape
-
+        batch_size, seq_size = y_index.shape
         if y_seqs is None:
             y_seqs = torch.LongTensor([seq_size] * batch_size)
 
@@ -45,12 +44,13 @@ class LabelConverter:
 
         for i in range(batch_size):
             n_seq = y_seqs[i]  # 192
-            sequence = y_index[:, i]
+            sequence = y_index[i]
             text = []
             for j in range(n_seq):
-                if sequence[j] != 0 and (not (j > 0 and sequence[j - 1] == sequence[j])):
+                if sequence[j] != 0:
                     text.append(self.i2c[sequence[j].item()])
-            texts.append(text)
+
+            texts.append(''.join(text))
 
         return texts
 
