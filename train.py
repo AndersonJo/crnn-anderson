@@ -245,7 +245,7 @@ def main():
     trainer = Trainer(gpus=opt.gpu,
                       max_epochs=opt.epoch,
                       checkpoint_callback=checkpoint_callback,
-                      val_percent_check=0.1,
+                      val_percent_check=1.,
                       # track_grad_norm=2,
                       log_gpu_memory=False)
     trainer.fit(model)
