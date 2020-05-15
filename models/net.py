@@ -5,32 +5,45 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 from torch.hub import load_state_dict_from_url
-from torchvision.models import ResNet as TorchVisionResnet
+from torchvision.models import ResNet as TorchVisionResnet, vgg19_bn
 from torchvision.models.resnet import model_urls, Bottleneck
 
 
 class AttentionRCNN(nn.Module):
-    def __init__(self, backbone: str, n_class: int, device: torch.device, hidden_size=64):
+    def __init__(self, backbone: str, n_class: int, use_pyramid: bool, device: torch.device, hidden_size=256):
         super(AttentionRCNN, self).__init__()
+        self.use_pyramid = use_pyramid
         self.device = device
         self.hidden_size = hidden_size
         self.resnet = load_resnet(backbone)
         self.pyramid = PyramidFeatures(*self.resnet.fpn_sizes)
 
-        # self.encoder = Encoder(128, self.hidden_size, device=self.device)
-        self.decoder = Decoder(768, 256, n_class, device=self.device)
+        if self.use_pyramid:
+            self.decoder = Decoder(320, 256, n_class, device=self.device)
+        else:
+            self.decoder = Decoder(1024, 256, n_class, device=self.device)
 
     def forward(self, x):
         batch_size = x.size(0)
 
         # Resnet & PyramidNet
         h = self.resnet(x)
-        # conv = h[-1]  # (batch, 2048, 8, 12)
-        # bs, fs, hs, ws = conv.shape
-        # reshaped_conv = conv.view(bs, fs, hs * ws)  # (batch, 2048, 96)
 
-        features = self.pyramid(h)
-        cnn_feature = torch.cat([f.squeeze(2) for f in features], dim=2)  # (batch, 64, 768)
+        if self.use_pyramid:
+            # Pyramid Net (Deconvolution Network)
+            features = self.pyramid(h)
+            cnn_feature = torch.cat([f.squeeze(2) for f in features], dim=2)  # (batch, 64, 768)
+            bs, ss, hs, ws = cnn_feature.shape
+            cnn_feature = cnn_feature.view(bs, ss, hs * ws)
+            cnn_feature = cnn_feature.permute(1, 0, 2)
+
+        else:
+            # No Pyramid
+            conv = h[-2]  # (batch, 2048, 8, 12)
+            bs, fs, hs, ws = conv.shape
+            cnn_feature = conv.view(bs, fs, hs * ws)  # (batch, cnn_feature, w*h) ex.(batch, 2048, 96)
+            # cnn_feature = self.linear(cnn_feature.permute(0, 2, 1))
+            cnn_feature = cnn_feature.permute(2, 0, 1)  # (width* height, batch, cnn_feature) ex.(96, 32, 2048)
 
         decoder_output = self.decoder(cnn_feature)
         return decoder_output
@@ -71,30 +84,33 @@ class PyramidFeatures(nn.Module):
         self.P5_1 = nn.Conv2d(C5_size, feature_size, kernel_size=1, stride=1, padding=0)
         self.P5_upsampled = nn.Upsample(scale_factor=2, mode='nearest')
         self.P5_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
-        self.P5_avg_pool = nn.AdaptiveAvgPool2d((1, 256))
+        self.P5_avg_pool = nn.AdaptiveAvgPool2d((8, 8))
 
         # add P5 elementwise to C4
         self.P4_1 = nn.Conv2d(C4_size, feature_size, kernel_size=1, stride=1, padding=0)
         self.P4_upsampled = nn.Upsample(scale_factor=2, mode='nearest')
         self.P4_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
-        self.P4_avg_pool = nn.AdaptiveAvgPool2d((1, 128))
+        self.P4_avg_pool = nn.AdaptiveAvgPool2d((8, 8))
 
         # add P4 elementwise to C3
         self.P3_1 = nn.Conv2d(C3_size, feature_size, kernel_size=1, stride=1, padding=0)
         self.P3_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
-        self.P3_avg_pool = nn.AdaptiveAvgPool2d((1, 128))
+        self.P3_avg_pool = nn.AdaptiveAvgPool2d((8, 8))
 
         # "P6 is obtained via a 3x3 stride-2 conv on C5"
         self.P6 = nn.Conv2d(C5_size, feature_size, kernel_size=3, stride=2, padding=1)
-        self.P6_avg_pool = nn.AdaptiveAvgPool2d((1, 128))
+        self.P6_avg_pool = nn.AdaptiveAvgPool2d((8, 8))
 
         # "P7 is computed by applying ReLU followed by a 3x3 stride-2 conv on P6"
         self.P7_1 = nn.ReLU()
         self.P7_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=2, padding=1)
-        self.P7_avg_pool = nn.AdaptiveAvgPool2d((1, 128))
+        self.P7_avg_pool = nn.AdaptiveAvgPool2d((8, 8))
 
     def forward(self, inputs):
         C3, C4, C5 = inputs
+
+        import ipdb
+        ipdb.set_trace()
 
         P5_h = self.P5_1(C5)
         P5_h = self.P5_upsampled(P5_h)
@@ -135,7 +151,6 @@ class Decoder(nn.Module):
         self.lstm2 = BidirectionalLSTM(256, 256, n_class)
 
     def forward(self, cnn_feature: torch.Tensor):
-        cnn_feature = cnn_feature.permute(1, 0, 2)
         ss, bs, hs = cnn_feature.shape
 
         # h_0, c_0 = self.init_hidden(batch_size=bs)

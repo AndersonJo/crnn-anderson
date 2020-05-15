@@ -5,12 +5,11 @@ import torch
 
 class LabelConverter:
 
-    def __init__(self, label_path: str, max_seq: int, pad=' ', delimiter='<delimeter>'):
+    def __init__(self, label_path: str, max_seq: int, pad='-'):
         self.label_path = label_path
         self.max_seq = max_seq
         self.c2i = dict()
         self.c2i[pad] = 0
-        self.c2i[delimiter] = 1
 
         with open(self.label_path, 'rt') as f:
             for line in f:
@@ -20,12 +19,12 @@ class LabelConverter:
     def to_tensor(self, texts) -> Tuple[torch.Tensor, torch.Tensor]:
         bs = len(texts)
 
-        y_label = torch.zeros(bs, self.max_seq, dtype=torch.int)  # batch, max_seq
+        y_label = torch.zeros(bs, self.max_seq*2, dtype=torch.int)  # batch, max_seq
         y_seq = torch.zeros(bs, dtype=torch.int)
         for i, text in enumerate(texts):
             for j, c in enumerate(text):
-                y_label[i, j] = self.c2i[c]
-            y_seq[i] = len(text)
+                y_label[i, j*2] = self.c2i[c]
+            y_seq[i] = len(text)*2
 
         return y_label, y_seq
 
@@ -47,7 +46,7 @@ class LabelConverter:
             sequence = y_index[i]
             text = []
             for j in range(n_seq):
-                if sequence[j] != 0:
+                if sequence[j] != 0 and (not (j > 0 and sequence[j - 1] == sequence[j])):
                     text.append(self.i2c[sequence[j].item()])
 
             texts.append(''.join(text))

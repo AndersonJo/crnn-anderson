@@ -1,4 +1,5 @@
 import os
+from typing import List
 
 from PIL import Image
 from skimage import io
@@ -14,7 +15,8 @@ class LicensePlateDataset(Dataset):
         self.dir_path = dir_path
         self.transform = transform
         self.img_files = [f for f in os.listdir(self.dir_path) if f.endswith('jpg')]
-        # self.img_files = self.img_files[:200]
+        self.img_files = self.filter_reapeated_text(self.img_files)
+        self.img_files = self.img_files[:8] * 100
 
     def __len__(self):
         return len(self.img_files)
@@ -29,6 +31,15 @@ class LicensePlateDataset(Dataset):
 
         y = file_name[:-4]
         return image, y
+
+    def filter_reapeated_text(self, texts: List[str]):
+        data = []
+        for text in texts:
+            for i in range(len(text) - 2):
+                if text[i] == text[i + 1] == text[i + 2]:
+                    data.append(text)
+                    break
+        return data
 
     def calculate_mean_and_std(self):
         images = [self[i][0] for i in tqdm(range(len(self)), desc='load')]

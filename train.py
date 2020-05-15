@@ -28,18 +28,22 @@ torch.manual_seed(128)
 def init() -> Namespace:
     parser = ArgumentParser()
     parser.add_argument('--epoch', default=1000, type=int, help='epoch size')
-    parser.add_argument('--batch', default=8, type=int, help='batch size')
+    parser.add_argument('--batch', default=16, type=int, help='batch size')
     parser.add_argument('--train', default='./train_data', help='the path of train dataset')
     parser.add_argument('--val', default='./valid_data', help='the path of validation dataset')
     parser.add_argument('--label', default='./label.txt', help='the path of label txt file')
     parser.add_argument('--checkpoint', default='./checkpoints', help='the path of checkpoint directory')
-    parser.add_argument('--width', default=384, type=int, help='resized image width')
-    parser.add_argument('--height', default=256, type=int, help='resized image height')
+    parser.add_argument('--width', default=160, type=int, help='resized image width')
+    parser.add_argument('--height', default=96, type=int, help='resized image height')
     parser.add_argument('--backbone', default='resnet50', type=str, help='cnn backbone')
     parser.add_argument('--max_seq', default=8, type=int, help='the maximum sequence length')
     parser.add_argument('--lr', default=0.001, type=int, help='initial learning rate (it uses decay of lr')
     parser.add_argument('--gpu', default=1, type=int, help='the number of gpus')
+    parser.add_argument('--pyramid', dest='pyramid', action='store_true')
+    parser.add_argument('--no-pyramid', dest='pyramid', action='store_false')
     parser.add_argument('--cuda', default='cuda')
+
+    parser.set_defaults(pyramid=True)
 
     opt = parser.parse_args()
     opt.train_path = os.path.join(BASE_DIR, opt.train)
@@ -49,6 +53,9 @@ def init() -> Namespace:
 
     if os.path.exists('lightning_logs'):
         shutil.rmtree('./lightning_logs')
+
+    print('Backbone:', opt.backbone)
+    print('Pyramid Net:', opt.pyramid)
     return opt
 
 
@@ -74,6 +81,7 @@ class AttentionCRNNModule(pl.LightningModule):
 
         self.model = AttentionRCNN(backbone=opt.backbone,
                                    n_class=self.n_label,
+                                   use_pyramid=opt.pyramid,
                                    device=opt.device)
         self.criterion = CTCLoss()
 
@@ -152,7 +160,7 @@ class AttentionCRNNModule(pl.LightningModule):
             if t1 == t2:
                 n_correct += 1
             for c1, c2 in zip(t1, t2):
-                if c1 == c2:
+                if c1 == c2 and not (c1 == '-' or c2 == '-'):
                     c_correct += 1
                 n_char += 1
 
@@ -186,15 +194,15 @@ class AttentionCRNNModule(pl.LightningModule):
     def transform_compose(self) -> transforms.Compose:
         if self._transform is not None:
             return self._transform
-        _mean = (114.35613348, 135.84955821, 105.15833282)
-        _std = (62.10358157, 51.18792043, 56.16809703)
+        # _mean = (114.35613348, 135.84955821, 105.15833282)
+        # _std = (62.10358157, 51.18792043, 56.16809703)
         transform = transforms.Compose([
             transforms.Resize((self.img_height, self.img_width)),
-            transforms.RandomVerticalFlip(0.3),
-            transforms.RandomGrayscale(0.1),
-            transforms.ColorJitter(brightness=(0.2, 2), contrast=(0.3, 2), saturation=(0.2, 2), hue=(-0.3, 0.3)),
+            # transforms.RandomVerticalFlip(0.3),
+            # transforms.RandomGrayscale(0.1),
+            # transforms.ColorJitter(brightness=(0.2, 2), contrast=(0.3, 2), saturation=(0.2, 2), hue=(-0.3, 0.3)),
             transforms.ToTensor(),
-            transforms.Normalize(_mean, _std)
+            transforms.Normalize(0.5, 0.5)
         ])
         self._transform = transform
         return self._transform
@@ -237,6 +245,7 @@ def main():
     trainer = Trainer(gpus=opt.gpu,
                       max_epochs=opt.epoch,
                       checkpoint_callback=checkpoint_callback,
+                      val_percent_check=0.1,
                       # track_grad_norm=2,
                       log_gpu_memory=False)
     trainer.fit(model)
