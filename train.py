@@ -37,13 +37,14 @@ def init() -> Namespace:
     parser.add_argument('--height', default=96, type=int, help='resized image height')
     parser.add_argument('--backbone', default='resnet50', type=str, help='cnn backbone')
     parser.add_argument('--max_seq', default=8, type=int, help='the maximum sequence length')
-    parser.add_argument('--lr', default=0.001, type=int, help='initial learning rate (it uses decay of lr')
+    parser.add_argument('--lr', default=0.0001, type=int, help='initial learning rate (it uses decay of lr')
     parser.add_argument('--gpu', default=1, type=int, help='the number of gpus')
     parser.add_argument('--pyramid', dest='pyramid', action='store_true')
     parser.add_argument('--no-pyramid', dest='pyramid', action='store_false')
+    parser.add_argument('--dev', dest='dev', action='store_true')
     parser.add_argument('--cuda', default='cuda')
 
-    parser.set_defaults(pyramid=True)
+    parser.set_defaults(pyramid=True, dev=False)
 
     opt = parser.parse_args()
     opt.train_path = os.path.join(BASE_DIR, opt.train)
@@ -56,6 +57,7 @@ def init() -> Namespace:
 
     print('Backbone:', opt.backbone)
     print('Pyramid Net:', opt.pyramid)
+    print('Development:', opt.dev)
     return opt
 
 
@@ -71,6 +73,7 @@ class AttentionCRNNModule(pl.LightningModule):
         self.valid_path: str = opt.val
         self.lr: float = opt.lr
         self.device = opt.device
+        self.dev = opt.dev
 
         self.label = LabelConverter(opt.label_path, opt.max_seq)
         self.n_label: int = self.label.n_label
@@ -175,8 +178,8 @@ class AttentionCRNNModule(pl.LightningModule):
         return [optimizer], [lr_scheduler]
 
     def prepare_data(self):
-        self.train_dataset = LicensePlateDataset(self.train_path, transform=self.transform_compose)
-        self.test_dataset = LicensePlateDataset(self.valid_path, transform=self._transform)
+        self.train_dataset = LicensePlateDataset(self.train_path, transform=self.get_transform(), dev=self.dev)
+        self.test_dataset = LicensePlateDataset(self.valid_path, transform=self.get_transform(), dev=self.dev)
 
     def train_dataloader(self) -> DataLoader:
         train_loader = DataLoader(self.train_dataset, batch_size=self.batch, shuffle=True, num_workers=4)
@@ -190,20 +193,24 @@ class AttentionCRNNModule(pl.LightningModule):
     #     test_loader = DataLoader(self.test_dataset, batch_size=self.batch, shuffle=True, num_workers=4)
     #     return test_loader
 
-    @property
-    def transform_compose(self) -> transforms.Compose:
+    def get_transform(self) -> transforms.Compose:
         if self._transform is not None:
             return self._transform
         # _mean = (114.35613348, 135.84955821, 105.15833282)
         # _std = (62.10358157, 51.18792043, 56.16809703)
         transform = transforms.Compose([
             transforms.Resize((self.img_height, self.img_width)),
-            # transforms.RandomVerticalFlip(0.3),
             transforms.RandomGrayscale(0.1),
             transforms.ColorJitter(brightness=(0.2, 2), contrast=(0.3, 2), saturation=(0.2, 2), hue=(-0.3, 0.3)),
             transforms.ToTensor(),
             transforms.Normalize(0.5, 0.5)
         ])
+        if self.dev:
+            transform = transforms.Compose([
+                transforms.Resize((self.img_height, self.img_width)),
+                transforms.ToTensor(),
+                transforms.Normalize(0.5, 0.5)
+            ])
         self._transform = transform
         return self._transform
 
@@ -242,10 +249,11 @@ def main():
                                           mode='min')
 
     # Train
+    val_percent_check = 0.1 if opt.dev else 1.
     trainer = Trainer(gpus=opt.gpu,
                       max_epochs=opt.epoch,
                       checkpoint_callback=checkpoint_callback,
-                      val_percent_check=1.,
+                      val_percent_check=val_percent_check,
                       # track_grad_norm=2,
                       log_gpu_memory=False)
     trainer.fit(model)

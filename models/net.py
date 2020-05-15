@@ -19,7 +19,7 @@ class AttentionRCNN(nn.Module):
         self.pyramid = PyramidFeatures(*self.resnet.fpn_sizes)
 
         if self.use_pyramid:
-            self.decoder = Decoder(320, 256, n_class, device=self.device)
+            self.decoder = Decoder(512, 256, n_class, device=self.device)
         else:
             self.decoder = Decoder(1024, 256, n_class, device=self.device)
 
@@ -31,18 +31,14 @@ class AttentionRCNN(nn.Module):
 
         if self.use_pyramid:
             # Pyramid Net (Deconvolution Network)
-            features = self.pyramid(h)
-            cnn_feature = torch.cat([f.squeeze(2) for f in features], dim=2)  # (batch, 64, 768)
-            bs, ss, hs, ws = cnn_feature.shape
-            cnn_feature = cnn_feature.view(bs, ss, hs * ws)
-            cnn_feature = cnn_feature.permute(1, 0, 2)
+            cnn_feature = self.pyramid(h)
+            cnn_feature = cnn_feature.permute(2, 0, 1)
 
         else:
             # No Pyramid
-            conv = h[-2]  # (batch, 2048, 8, 12)
+            conv = h[2]  # (batch, 2048, 8, 12)
             bs, fs, hs, ws = conv.shape
             cnn_feature = conv.view(bs, fs, hs * ws)  # (batch, cnn_feature, w*h) ex.(batch, 2048, 96)
-            # cnn_feature = self.linear(cnn_feature.permute(0, 2, 1))
             cnn_feature = cnn_feature.permute(2, 0, 1)  # (width* height, batch, cnn_feature) ex.(96, 32, 2048)
 
         decoder_output = self.decoder(cnn_feature)
@@ -69,72 +65,33 @@ class ResNet(TorchVisionResnet):
         h7 = self.layer3(h6)
         h8 = self.layer4(h7)
 
-        return h6, h7, h8
+        return h5, h6, h7, h8
 
 
 class PyramidFeatures(nn.Module):
     def __init__(self, C3_size, C4_size, C5_size, feature_size=64):
         super(PyramidFeatures, self).__init__()
 
-        self.C3_size = C3_size
-        self.C4_size = C4_size
-        self.C5_size = C5_size
-
-        # upsample C5 to get P5 from the FPN paper
-        self.P5_1 = nn.Conv2d(C5_size, feature_size, kernel_size=1, stride=1, padding=0)
-        self.P5_upsampled = nn.Upsample(scale_factor=2, mode='nearest')
-        self.P5_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
-        self.P5_avg_pool = nn.AdaptiveAvgPool2d((8, 8))
-
-        # add P5 elementwise to C4
-        self.P4_1 = nn.Conv2d(C4_size, feature_size, kernel_size=1, stride=1, padding=0)
-        self.P4_upsampled = nn.Upsample(scale_factor=2, mode='nearest')
-        self.P4_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
-        self.P4_avg_pool = nn.AdaptiveAvgPool2d((8, 8))
-
-        # add P4 elementwise to C3
-        self.P3_1 = nn.Conv2d(C3_size, feature_size, kernel_size=1, stride=1, padding=0)
-        self.P3_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
-        self.P3_avg_pool = nn.AdaptiveAvgPool2d((8, 8))
-
-        # "P6 is obtained via a 3x3 stride-2 conv on C5"
-        self.P6 = nn.Conv2d(C5_size, feature_size, kernel_size=3, stride=2, padding=1)
-        self.P6_avg_pool = nn.AdaptiveAvgPool2d((8, 8))
-
-        # "P7 is computed by applying ReLU followed by a 3x3 stride-2 conv on P6"
-        self.P7_1 = nn.ReLU()
-        self.P7_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=2, padding=1)
-        self.P7_avg_pool = nn.AdaptiveAvgPool2d((8, 8))
+        # self.c6_deconv = nn.Conv2d(512, 512, 1)
+        self.c7_deconv = nn.Conv2d(1024, 512, 1)
+        self.c8_deconv = nn.Conv2d(2048, 512, 1)
 
     def forward(self, inputs):
-        C3, C4, C5 = inputs
+        """
+        CNN features
+         - c5: (batch, 256, 24, 40)
+         - c6: (batch, 512, 12, 20)
+         - c7: (batch, 1024, 6, 10)
+         - c8: (batch, 2048, 3, 5)
+        """
+        c5, c6, c7, c8 = inputs
+        batch, ss, hw, ws = c6.shape
 
-        import ipdb
-        ipdb.set_trace()
-
-        P5_h = self.P5_1(C5)
-        P5_h = self.P5_upsampled(P5_h)
-        P5_h = self.P5_2(P5_h)
-        P5_y = self.P5_avg_pool(P5_h)
-
-        P4_h = self.P4_1(C4)
-        P4_h = P5_h + P4_h
-        P4_h = self.P4_upsampled(P4_h)
-        P4_x = self.P4_2(P4_h)
-        P4_y = self.P4_avg_pool(P4_x)
-
-        P3_h = self.P3_1(C3)
-        P3_h = P3_h + P4_h
-        P3_x = self.P3_2(P3_h)
-        P3_y = self.P3_avg_pool(P3_x)
-
-        P6_x = self.P6(C5)
-        P6_y = self.P6_avg_pool(P6_x)
-
-        P7_x = self.P7_2(self.P7_1(P6_x))
-        P7_y = self.P7_avg_pool(P7_x)
-
-        return [P3_y, P4_y, P5_y, P6_y, P7_y]
+        c6_h = c6.view(batch, ss, -1)
+        c7_h = self.c7_deconv(c7).view(batch, ss, -1)
+        c8_h = self.c8_deconv(c8).view(batch, ss, -1)
+        output = torch.cat([c6_h, c7_h, c8_h], dim=2)  # (batch, 512, 315)
+        return output
 
 
 class Decoder(nn.Module):
@@ -155,7 +112,7 @@ class Decoder(nn.Module):
 
         # h_0, c_0 = self.init_hidden(batch_size=bs)
         out1, (h_1, c_1) = self.lstm1(cnn_feature)
-        out2, (h_1, c_1) = self.lstm2(out1)
+        out2, (h_1, c_1) = self.lstm2(out1, (h_1, c_1))
         output = F.log_softmax(out2, dim=2)
         return output
 
