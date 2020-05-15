@@ -16,8 +16,8 @@ class AttentionRCNN(nn.Module):
         self.resnet = load_resnet(backbone)
         self.pyramid = PyramidFeatures(*self.resnet.fpn_sizes)
 
-        self.encoder = Encoder(128, self.hidden_size, device=self.device)
-        self.decoder = Decoder(self.hidden_size * 2, self.hidden_size, n_class, device=self.device)
+        # self.encoder = Encoder(128, self.hidden_size, device=self.device)
+        self.decoder = Decoder(768, 256, n_class, device=self.device)
 
     def forward(self, x):
         batch_size = x.size(0)
@@ -25,16 +25,8 @@ class AttentionRCNN(nn.Module):
         # Resnet & PyramidNet
         h = self.resnet(x)
         features = self.pyramid(h)
-        f_dim = features[0].size(2) * features[0].size(3)
-        cnn_feature = torch.cat([feature.view(batch_size, -1, f_dim) for feature in features], dim=1)
-
-        encoder_output, hiddens = self.encoder(cnn_feature)
-        h_0, c_0 = hiddens[-1]
-        h_s = torch.cat([h[0] for h in hiddens])
-        c_s = torch.cat([h[1] for h in hiddens])
-
-        decoder_output = self.decoder(cnn_feature, encoder_output, (h_0, c_0), h_s, c_s)
-
+        cnn_feature = torch.cat([f.squeeze(2) for f in features], dim=2)  # (8, 64, 768)
+        decoder_output = self.decoder(cnn_feature)
         return decoder_output
 
 
@@ -73,27 +65,27 @@ class PyramidFeatures(nn.Module):
         self.P5_1 = nn.Conv2d(C5_size, feature_size, kernel_size=1, stride=1, padding=0)
         self.P5_upsampled = nn.Upsample(scale_factor=2, mode='nearest')
         self.P5_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
-        self.P5_avg_pool = nn.AdaptiveAvgPool2d((8, 16))
+        self.P5_avg_pool = nn.AdaptiveAvgPool2d((1, 256))
 
         # add P5 elementwise to C4
         self.P4_1 = nn.Conv2d(C4_size, feature_size, kernel_size=1, stride=1, padding=0)
         self.P4_upsampled = nn.Upsample(scale_factor=2, mode='nearest')
         self.P4_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
-        self.P4_avg_pool = nn.AdaptiveAvgPool2d((8, 16))
+        self.P4_avg_pool = nn.AdaptiveAvgPool2d((1, 128))
 
         # add P4 elementwise to C3
         self.P3_1 = nn.Conv2d(C3_size, feature_size, kernel_size=1, stride=1, padding=0)
         self.P3_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
-        self.P3_avg_pool = nn.AdaptiveAvgPool2d((8, 16))
+        self.P3_avg_pool = nn.AdaptiveAvgPool2d((1, 128))
 
         # "P6 is obtained via a 3x3 stride-2 conv on C5"
         self.P6 = nn.Conv2d(C5_size, feature_size, kernel_size=3, stride=2, padding=1)
-        self.P6_avg_pool = nn.AdaptiveAvgPool2d((8, 16))
+        self.P6_avg_pool = nn.AdaptiveAvgPool2d((1, 128))
 
         # "P7 is computed by applying ReLU followed by a 3x3 stride-2 conv on P6"
         self.P7_1 = nn.ReLU()
         self.P7_2 = nn.Conv2d(feature_size, feature_size, kernel_size=3, stride=2, padding=1)
-        self.P7_avg_pool = nn.AdaptiveAvgPool2d((8, 16))
+        self.P7_avg_pool = nn.AdaptiveAvgPool2d((1, 128))
 
     def forward(self, inputs):
         C3, C4, C5 = inputs
@@ -120,43 +112,7 @@ class PyramidFeatures(nn.Module):
         P7_x = self.P7_2(self.P7_1(P6_x))
         P7_y = self.P7_avg_pool(P7_x)
 
-        return [P3_y, P5_y, P7_y]
-
-
-class Encoder(nn.Module):
-    def __init__(self, input_size: int, hidden_size: int, device):
-        super(Encoder, self).__init__()
-
-        self.batch_size = 1
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.device = device
-
-        self.lstm = nn.LSTM(input_size, hidden_size, bidirectional=True)
-
-    def forward(self, cnn_feature):
-        """
-        :param x: (batch_size, seq_size, input_size)
-        :return:
-        """
-        bs, ss, hs = cnn_feature.shape
-        h_0, c_0 = self.init_hidden(batch_size=bs)
-
-        cnn_feature = cnn_feature.permute(1, 0, 2)
-        encoder_outputs = []
-        hiddens = []
-        for encoder_input in cnn_feature:
-            encoder_output, (h_0, c_0) = self.lstm(encoder_input.unsqueeze(0), (h_0, c_0))
-            encoder_outputs.append(encoder_output)
-            hiddens.append((h_0, c_0))
-        return torch.cat(encoder_outputs), hiddens
-
-    def init_hidden(self, batch_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        # h_0: (n_layers * n_directions, batch, hidden_size)
-        # c_0: (n_layers * n_directions, batch, hidden_size)
-        h_0 = torch.zeros((2, batch_size, self.hidden_size), device=self.device)
-        c_0 = torch.zeros((2, batch_size, self.hidden_size), device=self.device)
-        return h_0, c_0
+        return [P3_y, P4_y, P5_y, P6_y, P7_y]
 
 
 class Decoder(nn.Module):
@@ -171,23 +127,26 @@ class Decoder(nn.Module):
 
         self.linear_h = nn.Linear(self.hidden_size, 32)
         self.linear_c = nn.Linear(self.hidden_size, 32)
-        self.lstm1 = BidirectionalLSTM(128, 32, 32)
-        self.lstm2 = BidirectionalLSTM(32, 32, n_class)
+        self.lstm1 = BidirectionalLSTM(768, 256, 256)
+        self.lstm2 = BidirectionalLSTM(256, 256, n_class)
 
-    def forward(self, cnn_feature: torch.Tensor, encoder_output: torch.Tensor,
-                hidden: Tuple[torch.Tensor, torch.Tensor], h_s: torch.Tensor, c_s: torch.Tensor):
+    def forward(self, cnn_feature: torch.Tensor):
         cnn_feature = cnn_feature.permute(1, 0, 2)
-        cnn_ss, cnn_bs, cnn_ds = cnn_feature.shape
-
-        h_0, c_0 = hidden
-        h_0 = self.linear_h(h_0)
-        c_0 = self.linear_c(c_0)
-
         cnn_feature = self.dropout(cnn_feature)
+        ss, bs, hs = cnn_feature.shape
+
+        h_0, c_0 = self.init_hidden(batch_size=bs)
         out1, (h_1, c_1) = self.lstm1(cnn_feature, h_0, c_0)
         out2, (h_1, c_1) = self.lstm2(out1, h_1, c_1)
         output = F.log_softmax(out2, dim=2)
         return output
+
+    def init_hidden(self, batch_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        # h_0: (n_layers * n_directions, batch, hidden_size)
+        # c_0: (n_layers * n_directions, batch, hidden_size)
+        h_0 = torch.zeros((2, batch_size, self.hidden_size), device=self.device)
+        c_0 = torch.zeros((2, batch_size, self.hidden_size), device=self.device)
+        return h_0, c_0
 
 
 class BidirectionalLSTM(nn.Module):

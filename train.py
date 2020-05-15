@@ -89,7 +89,7 @@ class AttentionCRNNModule(pl.LightningModule):
         y_text, y_label, y_seq, y_pred, y_pred_seq, loss = self.calculate_loss(batch)
         y_index, pred_text, n_correct, word_acc, char_acc = self.calculate_acc(y_text, y_pred)
 
-        if batch_idx % 20 == 0:
+        if batch_idx % 20 == 0 and self.logger:
             log_text = '  |  '.join([f'{t2}({t1})' for t1, t2 in zip(y_text[:3], pred_text[:3])])
             self.logger.experiment.add_text('pred_text', log_text)
 
@@ -138,8 +138,6 @@ class AttentionCRNNModule(pl.LightningModule):
 
     def calculate_acc(self, y_text, y_pred):
         _, y_index = y_pred.max(2)  # y_index: maximum index locations (seq, batch) ex.(192, 8)
-        import ipdb
-        ipdb.set_trace()
         y_index = y_index.transpose(0, 1)
         pred_text = self.label.to_text(y_index)
 
