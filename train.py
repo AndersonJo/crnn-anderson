@@ -35,7 +35,7 @@ def init() -> Namespace:
     parser.add_argument('--checkpoint', default='./checkpoints', help='the path of checkpoint directory')
     parser.add_argument('--width', default=384, type=int, help='resized image width')
     parser.add_argument('--height', default=256, type=int, help='resized image height')
-    parser.add_argument('--backbone', default='resnet101', type=str, help='cnn backbone')
+    parser.add_argument('--backbone', default='resnet50', type=str, help='cnn backbone')
     parser.add_argument('--max_seq', default=8, type=int, help='the maximum sequence length')
     parser.add_argument('--lr', default=0.001, type=int, help='initial learning rate (it uses decay of lr')
     parser.add_argument('--gpu', default=1, type=int, help='the number of gpus')

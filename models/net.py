@@ -3,6 +3,7 @@ from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 from torch.hub import load_state_dict_from_url
 from torchvision.models import ResNet as TorchVisionResnet
 from torchvision.models.resnet import model_urls, Bottleneck
@@ -24,14 +25,13 @@ class AttentionRCNN(nn.Module):
 
         # Resnet & PyramidNet
         h = self.resnet(x)
-        conv = h[-1]  #  (batch, 2048, 8, 12)
+        conv = h[-1]  # (batch, 2048, 8, 12)
         bs, fs, hs, ws = conv.shape
-        conv = conv.view(bs, fs, hs*ws)  # (batch, 2048, 96)
+        reshaped_conv = conv.view(bs, fs, hs * ws)  # (batch, 2048, 96)
 
         # features = self.pyramid(h)
         # cnn_feature = torch.cat([f.squeeze(2) for f in features], dim=2)  # (batch, 64, 768)
-
-        decoder_output = self.decoder(conv)
+        decoder_output = self.decoder(reshaped_conv)
         return decoder_output
 
 
@@ -135,12 +135,11 @@ class Decoder(nn.Module):
 
     def forward(self, cnn_feature: torch.Tensor):
         cnn_feature = cnn_feature.permute(2, 0, 1)
-        cnn_feature = self.dropout(cnn_feature)
         ss, bs, hs = cnn_feature.shape
 
-        h_0, c_0 = self.init_hidden(batch_size=bs)
-        out1, (h_1, c_1) = self.lstm1(cnn_feature, h_0, c_0)
-        out2, (h_1, c_1) = self.lstm2(out1, h_1, c_1)
+        # h_0, c_0 = self.init_hidden(batch_size=bs)
+        out1, (h_1, c_1) = self.lstm1(cnn_feature)
+        out2, (h_1, c_1) = self.lstm2(out1)
         output = F.log_softmax(out2, dim=2)
         return output
 
@@ -160,8 +159,8 @@ class BidirectionalLSTM(nn.Module):
         self.rnn = nn.LSTM(nIn, nHidden, bidirectional=True)
         self.embedding = nn.Linear(nHidden * 2, nOut)
 
-    def forward(self, input, h_0, c_0):
-        recurrent, (h_1, c_1) = self.rnn(input, (h_0, c_0))
+    def forward(self, input, hidden=None):
+        recurrent, (h_1, c_1) = self.rnn(input, hidden)
         T, b, h = recurrent.size()
         t_rec = recurrent.view(T * b, h)
 
@@ -171,8 +170,8 @@ class BidirectionalLSTM(nn.Module):
         return output, (h_1, c_1)
 
 
-def load_resnet(backbone: str = 'resnet101', **kwargs):
-    model = ResNet(Bottleneck, [3, 4, 23, 3], **kwargs)
+def load_resnet(backbone: str = 'resnet50', **kwargs):
+    model = ResNet(Bottleneck, [3, 4, 6, 3], **kwargs)
     state_dict = load_state_dict_from_url(model_urls[backbone], progress=True)
     model.load_state_dict(state_dict)
     return model
