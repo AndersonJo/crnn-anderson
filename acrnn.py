@@ -324,9 +324,6 @@ def inference(opt, model):
     print(f'char accuracy    : {acc_char:.8f}')
     print(results.describe())
 
-    import ipdb
-    ipdb.set_trace()
-
 
 def main():
     opt = init()
