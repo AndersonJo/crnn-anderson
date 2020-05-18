@@ -2,18 +2,23 @@ import os
 import re
 import shutil
 from argparse import ArgumentParser, Namespace
+from datetime import datetime
 from typing import Union, List, Tuple
 
 import numpy as np
+import pandas as pd
 import pytorch_lightning as pl
 import torch
 import torch.optim as optim
+from PIL import Image
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
+from skimage import io
 from torch.nn import CTCLoss
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from tqdm import tqdm
 
 from dataset import LicensePlateDataset
 from models.net import AttentionRCNN
@@ -27,6 +32,12 @@ torch.manual_seed(128)
 
 def init() -> Namespace:
     parser = ArgumentParser()
+    parser.add_argument('mode', default='inference', help='inference or train')
+    # Inference
+    parser.add_argument('--input', default='./valid_data', help='inference input (directory)')
+    parser.add_argument('--output', default='./output', help='inference output (directory)')
+
+    # Train and Inference
     parser.add_argument('--epoch', default=1000, type=int, help='epoch size')
     parser.add_argument('--batch', default=16, type=int, help='batch size')
     parser.add_argument('--train', default='./train_data', help='the path of train dataset')
@@ -215,7 +226,7 @@ class AttentionCRNNModule(pl.LightningModule):
         return self._transform
 
 
-def load_model(opt):
+def load_model(opt) -> AttentionCRNNModule:
     model = None
     if os.path.exists(opt.checkpoint):
         regex = re.compile(r'epoch=(\d+)_val_loss=(\d+\.\d+)\.ckpt')
@@ -235,10 +246,7 @@ def load_model(opt):
     return model
 
 
-def main():
-    opt = init()
-    model = load_model(opt)
-
+def train(opt, model):
     # Checkpoint
     checkpoint_path = os.path.join(opt.checkpoint, '{epoch:02}_{val_loss:.4f}')
     checkpoint_callback = ModelCheckpoint(filepath=checkpoint_path,
@@ -257,6 +265,79 @@ def main():
                       # track_grad_norm=2,
                       log_gpu_memory=False)
     trainer.fit(model)
+
+
+def inference(opt, model):
+    shutil.rmtree(opt.output)
+
+    if not os.path.exists(opt.output):
+        os.mkdir(opt.output)
+
+    # DataLoader
+    device = opt.device
+    transform = transforms.Compose([
+        transforms.Resize((opt.height, opt.width)),
+        transforms.ToTensor(),
+        transforms.Normalize(0.5, 0.5)
+    ])
+
+    test_dataset = LicensePlateDataset(opt.input, transform=transform)
+    test_dataloader = DataLoader(test_dataset, batch_size=opt.batch, shuffle=True, num_workers=4)
+
+    start_dt = datetime.now()
+    results = []
+    for batch in tqdm(test_dataloader, desc='Batch'):
+        images, y_text = batch
+
+        y_pred = model(images.to(device))
+        _, y_index = y_pred.max(2)  # y_index: maximum index locations (seq, batch) ex.(192, 8)
+        y_index = y_index.transpose(0, 1)
+        pred_text = model.label.to_text(y_index)
+
+        # Save results to outputs
+        for t1, t2 in zip(y_text, pred_text):
+            row = {}
+            row['y_true'] = t1
+            row['y_pred'] = t2
+            row['is_correct'] = t1 == t2
+            row['n_correct_char'] = sum([a == b for a, b in zip(t1, t2)])
+            results.append(row)
+
+            # Save image
+            if np.random.rand() > 0.95 or not row['is_correct']:
+                from_filename = os.path.join(opt.input, f'{t1}.jpg')
+                original_image = Image.fromarray(io.imread(from_filename))
+                to_filename = os.path.join(opt.output, f'{"o" if row["is_correct"] else "x"}_{t2}_({t1}).jpg')
+                original_image.save(to_filename)
+
+    results = pd.DataFrame(results)
+    test_size = results.shape[0]
+    acc_word = results['is_correct'].mean()
+    acc_char = results['n_correct_char'].mean()
+    taken_dt = datetime.now() - start_dt
+    print(f'test_size        : {test_size}')
+    print(f'total taken time :', taken_dt)
+    print(f'time per image   :', taken_dt / test_size)
+    print(f'n correct word   :', results['is_correct'].sum())
+    print(f'n incorrect word :', (~results['is_correct']).sum())
+    print(f'word accuracy    : {acc_word:.8f}')
+    print(f'char accuracy    : {acc_char:.8f}')
+    print(results.describe())
+
+    import ipdb
+    ipdb.set_trace()
+
+
+def main():
+    opt = init()
+    model = load_model(opt)
+
+    # Train
+    if opt.mode == 'train':
+        train(opt, model)
+
+    else:
+        inference(opt, model)
 
     # Development
     # model.prepare_data()
