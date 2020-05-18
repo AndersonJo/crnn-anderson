@@ -7,7 +7,7 @@ from torch import nn
 
 from models.net import AttentionRCNN
 from tools.label import LabelConverter
-from train import AttentionCRNNModule
+from acrnn import AttentionCRNNModule
 
 
 def init() -> Namespace:
