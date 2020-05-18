@@ -19,9 +19,9 @@ class AttentionRCNN(nn.Module):
         self.pyramid = PyramidFeatures(*self.resnet.fpn_sizes)
 
         if self.use_pyramid:
-            self.decoder = Decoder(768, 384, n_class, device=self.device)
+            self.decoder = Decoder(512, 256, n_class, device=self.device)
         else:
-            self.decoder = Decoder(1024, 384, n_class, device=self.device)
+            self.decoder = Decoder(1024, 256, n_class, device=self.device)
 
     def forward(self, x):
         batch_size = x.size(0)
@@ -32,7 +32,7 @@ class AttentionRCNN(nn.Module):
         if self.use_pyramid:
             # Pyramid Net (Deconvolution Network)
             cnn_feature = self.pyramid(h)
-            cnn_feature = cnn_feature.permute(2, 0, 1)  # (107, 16, 512)
+            cnn_feature = cnn_feature.permute(2, 0, 1)
 
         else:
             # No Pyramid
@@ -72,10 +72,9 @@ class PyramidFeatures(nn.Module):
     def __init__(self, C3_size, C4_size, C5_size, feature_size=64):
         super(PyramidFeatures, self).__init__()
 
-        self.c5_deconv = nn.Conv2d(256, 768, 1)
-        self.c6_deconv = nn.Conv2d(512, 768, 1)
-        self.c7_deconv = nn.Conv2d(1024, 768, 1)
-        self.c8_deconv = nn.Conv2d(2048, 768, 1)
+        # self.c6_deconv = nn.Conv2d(512, 512, 1)
+        self.c7_deconv = nn.Conv2d(1024, 512, 1)
+        self.c8_deconv = nn.Conv2d(2048, 512, 1)
 
     def forward(self, inputs):
         """
@@ -88,11 +87,10 @@ class PyramidFeatures(nn.Module):
         c5, c6, c7, c8 = inputs
         batch, ss, hw, ws = c6.shape
 
-        c5_h = self.c5_deconv(c5).view(batch, 768, -1)
-        c6_h = self.c6_deconv(c6).view(batch, 768, -1)
-        c7_h = self.c7_deconv(c7).view(batch, 768, -1)
-        c8_h = self.c8_deconv(c8).view(batch, 768, -1)
-        output = torch.cat([c5_h, c6_h, c7_h, c8_h], dim=2)  # (batch, 512, 315)
+        c6_h = c6.view(batch, ss, -1)
+        c7_h = self.c7_deconv(c7).view(batch, ss, -1)
+        c8_h = self.c8_deconv(c8).view(batch, ss, -1)
+        output = torch.cat([c6_h, c7_h, c8_h], dim=2)  # (batch, 512, 315)
         return output
 
 
@@ -106,14 +104,14 @@ class Decoder(nn.Module):
 
         self.dropout = nn.Dropout(0.1)
 
-        self.lstm1 = BidirectionalLSTM(self.input_size, self.hidden_size, self.hidden_size)
-        self.lstm2 = BidirectionalLSTM(self.hidden_size, self.hidden_size, n_class)
+        self.lstm1 = BidirectionalLSTM(self.input_size, 256, 256)
+        self.lstm2 = BidirectionalLSTM(256, 256, n_class)
 
     def forward(self, cnn_feature: torch.Tensor):
         ss, bs, hs = cnn_feature.shape
 
-        h_0, c_0 = self.init_hidden(batch_size=bs)
-        out1, (h_1, c_1) = self.lstm1(cnn_feature, (h_0, c_0))
+        # h_0, c_0 = self.init_hidden(batch_size=bs)
+        out1, (h_1, c_1) = self.lstm1(cnn_feature)
         out2, (h_1, c_1) = self.lstm2(out1, (h_1, c_1))
         output = F.log_softmax(out2, dim=2)
         return output
