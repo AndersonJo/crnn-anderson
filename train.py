@@ -27,6 +27,7 @@ torch.manual_seed(128)
 
 def init() -> Namespace:
     parser = ArgumentParser()
+    parser.add_argument('mode', default='inference', help='inference or train')
     parser.add_argument('--epoch', default=1000, type=int, help='epoch size')
     parser.add_argument('--batch', default=16, type=int, help='batch size')
     parser.add_argument('--train', default='./train_data', help='the path of train dataset')
